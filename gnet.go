@@ -14,6 +14,8 @@ import (
 
 	"github.com/panjf2000/gnet/netpoll"
 	"github.com/panjf2000/gnet/ringbuffer"
+
+	"golang.org/x/sys/unix"
 )
 
 // socketRingBufferSize represents the initial size of connection ring-buffer.
@@ -103,6 +105,12 @@ type Conn interface {
 
 	// InboundBuffer returns the inbound ring-buffer.
 	InboundBuffer() *ringbuffer.RingBuffer
+
+	// Sa returns the SockAddr
+	Sa() unix.Sockaddr
+
+	// Fd returns the file descriptor
+	Fd() int
 
 	// AsyncWrite writes data to client/connection asynchronously, usually you would invoke it in a biz goroutine instead of
 	// the event-loop goroutine.

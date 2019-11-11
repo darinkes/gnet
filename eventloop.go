@@ -197,6 +197,7 @@ func (lp *loop) loopUDPIn(fd int) error {
 	}
 	c := &conn{
 		fd:            fd,
+		sa:            sa,
 		localAddr:     lp.svr.ln.lnaddr,
 		remoteAddr:    netpoll.SockaddrToUDPAddr(sa),
 		inboundBuffer: lp.svr.bytesPool.Get().(*ringbuffer.RingBuffer),

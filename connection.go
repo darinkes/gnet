@@ -159,6 +159,14 @@ func (c *conn) BufferLength() int {
 	return c.inboundBuffer.Length() + len(c.cache)
 }
 
+func(c* conn) Fd() int {
+	return c.fd
+}
+
+func(c* conn) Sa() unix.Sockaddr {
+	return c.sa
+}
+
 func (c *conn) AsyncWrite(buf []byte) {
 	if encodedBuf, err := c.loop.svr.codec.Encode(buf); err == nil {
 		_ = c.loop.poller.Trigger(func() error {
