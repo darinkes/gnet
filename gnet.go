@@ -14,6 +14,8 @@ import (
 
 	"github.com/panjf2000/gnet/netpoll"
 	"github.com/panjf2000/gnet/ringbuffer"
+
+	"golang.org/x/sys/unix"
 )
 
 // socketRingBufferSize represents the initial size of connection ring-buffer.
@@ -147,6 +149,8 @@ type EventHandler interface {
 	// Tick fires immediately after the server starts and will fire again
 	// following the duration specified by the delay return value.
 	Tick() (delay time.Duration, action Action)
+
+	OnConnectionEstablished(c *Client) (action Action)
 }
 
 // EventServer is a built-in implementation of EventHandler which sets up each method with a default implementation,
@@ -188,6 +192,10 @@ func (es *EventServer) React(c Conn) (out []byte, action Action) {
 // Tick fires immediately after the server starts and will fire again
 // following the duration specified by the delay return value.
 func (es *EventServer) Tick() (delay time.Duration, action Action) {
+	return
+}
+
+func (es *EventServer) OnConnectionEstablished(c *Client) (action Action) {
 	return
 }
 
@@ -243,6 +251,59 @@ func Serve(eventHandler EventHandler, addr string, opts ...Option) error {
 	return serve(eventHandler, &ln, options)
 }
 
+
+func Connect(eventHandler EventHandler, addr string, opts ...Option) error {
+	var con connection
+
+	options := initOptions(opts...)
+
+	con.network, con.addr = parseAddr(addr)
+
+	var err error
+	if con.network == "udp" {
+		addr, err := net.ResolveUDPAddr(con.network, con.addr)
+		if err != nil {
+			return err
+		}
+
+		con.pconn, err = net.DialUDP(con.network, nil, addr)
+		if err != nil {
+			return err
+		}
+	} else {
+		addr, err := net.ResolveTCPAddr(con.network, con.addr)
+		if err != nil {
+			return err
+		}
+
+		con.pconn, err = net.DialTCP(con.network, nil, addr)
+		if err != nil {
+			return err
+		}
+
+	}
+
+	switch c := con.pconn.(type) {
+	case *net.UDPConn:
+		con.f, err = c.File()
+	case *net.TCPConn:
+		con.f, err = c.File()
+	}
+
+	if err != nil {
+		return err
+	}
+
+	con.fd = int(con.f.Fd())
+
+	err = unix.SetNonblock(con.fd, true)
+	if err != nil {
+		return err
+	}
+
+	return connect(eventHandler, &con, options)
+}
+
 func parseAddr(addr string) (network, address string) {
 	network = "tcp"
 	address = addr
@@ -257,6 +318,15 @@ type listener struct {
 	ln      net.Listener
 	lnaddr  net.Addr
 	pconn   net.PacketConn
+	f       *os.File
+	fd      int
+	network string
+	addr    string
+}
+
+type connection struct {
+	lnaddr  net.Addr
+	pconn   net.Conn
 	f       *os.File
 	fd      int
 	network string

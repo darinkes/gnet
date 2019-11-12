@@ -19,6 +19,7 @@ import (
 type loop struct {
 	idx         int             // loop index in the server loops list
 	svr         *server         // server in loop
+	cl          *Client         // client in loop
 	packet      []byte          // read packet buffer
 	poller      *netpoll.Poller // epoll or kqueue
 	connections map[int]*conn   // loop connections fd -> conn
@@ -217,5 +218,71 @@ func (lp *loop) loopUDPIn(fd int) error {
 	lp.svr.bytesPool.Put(c.inboundBuffer)
 	c = nil
 
+	return nil
+}
+
+func (lp *loop) loopCloseClientConn(c *conn, err error) error {
+	if lp.poller.Delete(c.fd) == nil && unix.Close(c.fd) == nil {
+		delete(lp.connections, c.fd)
+		switch lp.cl.eventHandler.OnClosed(c, err) {
+		case Shutdown:
+			return errShutdown
+		}
+		c.release()
+	}
+	return nil
+}
+
+func (lp *loop) loopClientIn(c *conn) error {
+	n, err := unix.Read(c.fd, lp.packet)
+	if n == 0 || err != nil {
+		if err == unix.EAGAIN {
+			return nil
+		}
+		return lp.loopCloseClientConn(c, err)
+	}
+	c.cache = lp.packet[:n]
+
+loopReact:
+	out, action := lp.cl.eventHandler.React(c)
+	if len(out) != 0 {
+		if frame, err := lp.cl.codec.Encode(out); err == nil {
+			c.write(frame)
+		}
+		goto loopReact
+	}
+	_, _ = c.inboundBuffer.Write(c.cache)
+
+	c.action = action
+	return lp.handleAction(c)
+}
+
+func (lp *loop) loopClientOut(c *conn) error {
+	lp.cl.eventHandler.PreWrite()
+
+	head, tail := c.outboundBuffer.LazyReadAll()
+	n, err := unix.Write(c.fd, head)
+	if err != nil {
+		if err == unix.EAGAIN {
+			return nil
+		}
+		return lp.loopCloseClientConn(c, err)
+	}
+	c.outboundBuffer.Shift(n)
+
+	if len(head) == n && tail != nil {
+		n, err = unix.Write(c.fd, tail)
+		if err != nil {
+			if err == unix.EAGAIN {
+				return nil
+			}
+			return lp.loopCloseConn(c, err)
+		}
+		c.outboundBuffer.Shift(n)
+	}
+
+	if c.outboundBuffer.IsEmpty() {
+		_ = lp.poller.ModRead(c.fd)
+	}
 	return nil
 }

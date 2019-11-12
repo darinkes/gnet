@@ -38,6 +38,15 @@ func newConn(fd int, lp *loop, sa unix.Sockaddr) *conn {
 	}
 }
 
+func newClientConn(fd int, lp *loop) *conn {
+	return &conn{
+		fd:             fd,
+		loop:           lp,
+		inboundBuffer:  lp.cl.bytesPool.Get().(*ringbuffer.RingBuffer),
+		outboundBuffer: lp.cl.bytesPool.Get().(*ringbuffer.RingBuffer),
+	}
+}
+
 func (c *conn) release() {
 	c.opened = false
 	c.sa = nil
@@ -47,8 +56,14 @@ func (c *conn) release() {
 	c.remoteAddr = nil
 	c.inboundBuffer.Reset()
 	c.outboundBuffer.Reset()
-	c.loop.svr.bytesPool.Put(c.inboundBuffer)
-	c.loop.svr.bytesPool.Put(c.outboundBuffer)
+	if c.loop.svr != nil {
+		c.loop.svr.bytesPool.Put(c.inboundBuffer)
+		c.loop.svr.bytesPool.Put(c.outboundBuffer)
+	}
+	if c.loop.cl != nil {
+		c.loop.cl.bytesPool.Put(c.inboundBuffer)
+		c.loop.cl.bytesPool.Put(c.outboundBuffer)
+	}
 	c.inboundBuffer = nil
 	c.outboundBuffer = nil
 }
